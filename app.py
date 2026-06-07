@@ -140,14 +140,30 @@ def previous_period(date_start, date_end):
     return prev_start.isoformat(), prev_end.isoformat()
 
 
-def delta_badge(cur, prev):
+def period_label(date_start, date_end):
+    """依目前區間長度，給『前期』一個白話名稱 (前一週/月/季/年)。"""
+    if not date_start or not date_end:
+        return "前期"
+    length = (_as_date(date_end) - _as_date(date_start)).days + 1  # 含頭含尾天數
+    if 6 <= length <= 8:
+        return "前一週"
+    if 26 <= length <= 31:
+        return "前一個月"
+    if 84 <= length <= 95:
+        return "前一季"
+    if 358 <= length <= 372:
+        return "前一年"
+    return f"前 {length} 天"
+
+
+def delta_badge(cur, prev, label="前期"):
     """產生環比變化文字 (▲/▼ 百分比)，前期無資料時顯示『—』。"""
     if not prev:
         return html.Span("— 無前期可比", className="text-muted")
     pct = (cur - prev) / prev * 100
     up = pct >= 0
     return html.Span(
-        f"{'▲' if up else '▼'} {abs(pct):.1f}% vs 前期",
+        f"{'▲' if up else '▼'} {abs(pct):.1f}% vs {label}",
         style={"color": "#18BC9C" if up else "#E74C3C", "fontWeight": "600"},
     )
 
@@ -157,6 +173,10 @@ def delta_badge(cur, prev):
 # ──────────────────────────────────────────────────────────────
 NAVY = "#2C3E50"
 BLUE = "#2980B9"
+
+# 效能 Badge 樣式：出現約 1 秒後快速淡出 (透過 opacity 切換)
+BADGE_STYLE = {"fontSize": "1rem", "fontWeight": "600",
+               "whiteSpace": "nowrap", "transition": "opacity .4s"}
 
 
 def kpi_card(card_id, title, icon, color):
@@ -189,8 +209,7 @@ banner = dbc.Navbar(
                     dbc.Badge(
                         id="perf-badge", color="warning", text_color="dark",
                         className="px-3 py-2 shadow",
-                        style={"fontSize": "1rem", "fontWeight": "600",
-                               "whiteSpace": "nowrap"},
+                        style={**BADGE_STYLE, "opacity": 0},
                     ),
                     width="auto",
                     className="ms-auto",
@@ -471,6 +490,8 @@ app.layout = dbc.Container(
                 dbc.Col(
                     [
                         kpi_row,
+                        html.Div(id="kpi-compare-note",
+                                 className="text-muted small mb-3"),
                         dbc.Tabs(
                             [tab_events, tab_products],
                             id="main-tabs",
@@ -520,6 +541,7 @@ KPI_SQL = """
     Output("event-comp",   "figure"),
     Output("funnel-chart", "figure"),
     Output("funnel-rates", "children"),
+    Output("kpi-compare-note", "children"),
     Output("perf-badge",   "children"),
     Output("events-table", "page_current"),
     Input("medium-filter",    "value"),
@@ -538,14 +560,26 @@ def refresh_events(mediums, event_names, countries, keyword, date_start, date_en
     # 本期 KPI
     kpi = con.execute(KPI_SQL.format(where=where), params).fetchone()
 
-    # 前期 KPI (環比) ── 等長且緊鄰的前一區間
+    # 前期 KPI (環比) ── 與目前區間「等長且緊鄰其前」的一段
     prev_start, prev_end = previous_period(date_start, date_end)
+    plabel = period_label(date_start, date_end)
     if prev_start:
         where_p, params_p = build_filter(mediums, keyword, prev_start, prev_end,
                                          countries, event_names)
         kpi_p = con.execute(KPI_SQL.format(where=where_p), params_p).fetchone()
+        if kpi_p[0]:
+            compare_note = (
+                f"📊 KPI 下方的環比＝本區間 vs 「{plabel}」"
+                f"（{prev_start} ~ {prev_end}，與目前區間等長緊鄰）"
+            )
+        else:
+            compare_note = (
+                f"📊 環比：「{plabel}」（{prev_start} ~ {prev_end}）落在資料範圍外，"
+                f"故顯示「無前期可比」。把日期區間調短即可看到環比。"
+            )
     else:
         kpi_p = (None, None, None, None)
+        compare_note = "📊 環比：尚未選定日期區間。"
 
     # 時序趨勢 (+ 7 日移動平均)
     trend = con.execute(
@@ -686,11 +720,30 @@ def refresh_events(mediums, event_names, countries, keyword, date_start, date_en
     badge = f"⚡ DuckDB 查詢 {elapsed*1000:.0f} ms · 掃描 {kpi[0]:,} 筆"
     return (
         f"{kpi[0]:,}", f"{kpi[1]:,}", f"${kpi[2]:,.0f}", f"{kpi[3]:,}",
-        delta_badge(kpi[0], kpi_p[0]), delta_badge(kpi[1], kpi_p[1]),
-        delta_badge(kpi[2], kpi_p[2]), delta_badge(kpi[3], kpi_p[3]),
-        fig_trend, fig_pie, fig_comp, fig_funnel, rate_items,
+        delta_badge(kpi[0], kpi_p[0], plabel), delta_badge(kpi[1], kpi_p[1], plabel),
+        delta_badge(kpi[2], kpi_p[2], plabel), delta_badge(kpi[3], kpi_p[3], plabel),
+        fig_trend, fig_pie, fig_comp, fig_funnel, rate_items, compare_note,
         badge, 0,
     )
+
+
+# 效能 Badge：每次更新後在瀏覽器端先顯示、約 1 秒後自動淡出 (clientside，最可靠)
+app.clientside_callback(
+    """
+    function(children) {
+        var el = document.getElementById('perf-badge');
+        if (el) {
+            el.style.opacity = 1;
+            clearTimeout(window.__perfBadgeTimer);
+            window.__perfBadgeTimer = setTimeout(function(){ el.style.opacity = 0; }, 1000);
+        }
+        return '';
+    }
+    """,
+    Output("perf-badge", "title"),
+    Input("perf-badge", "children"),
+    prevent_initial_call=False,
+)
 
 
 # ──────────────────────────────────────────────────────────────
@@ -700,7 +753,11 @@ def build_product_where(mediums, keyword, date_start, date_end,
                         countries, categories):
     """商品分析專用 WHERE：只計 purchase 事件，事件級篩選以 EXISTS 半連接套用，
     避免 events×products 多對多 JOIN 造成營收/數量被重複加總而暴增。"""
-    pclauses = ["p.event_name = 'purchase'"]
+    pclauses = [
+        "p.event_name = 'purchase'",
+        "p.item_name IS NOT NULL",
+        "p.item_name NOT IN ('', '(not set)')",  # 濾掉整列去識別化的垃圾品項
+    ]
     pparams = []
     if date_start:
         pclauses.append("p.event_date >= ?")
