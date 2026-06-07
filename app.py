@@ -186,8 +186,12 @@ banner = dbc.Navbar(
                     width="auto",
                 ),
                 dbc.Col(
-                    dbc.Badge(id="perf-badge", color="warning", text_color="dark",
-                              className="p-2 fs-6 shadow"),
+                    dbc.Badge(
+                        id="perf-badge", color="warning", text_color="dark",
+                        className="px-3 py-2 shadow",
+                        style={"fontSize": "1rem", "fontWeight": "600",
+                               "whiteSpace": "nowrap"},
+                    ),
                     width="auto",
                     className="ms-auto",
                 ),
@@ -461,8 +465,6 @@ server = app.server
 app.layout = dbc.Container(
     [
         banner,
-        dcc.Interval(id="badge-timer", interval=3500, n_intervals=0,
-                     max_intervals=1, disabled=True),
         dbc.Row(
             [
                 dbc.Col(control_panel, md=3),
@@ -519,9 +521,6 @@ KPI_SQL = """
     Output("funnel-chart", "figure"),
     Output("funnel-rates", "children"),
     Output("perf-badge",   "children"),
-    Output("perf-badge",   "style"),
-    Output("badge-timer",  "n_intervals"),
-    Output("badge-timer",  "disabled"),
     Output("events-table", "page_current"),
     Input("medium-filter",    "value"),
     Input("eventname-filter", "value"),
@@ -684,26 +683,14 @@ def refresh_events(mediums, event_names, countries, keyword, date_start, date_en
                   style={"color": "#E74C3C", "fontSize": "1.1rem"}),
     ]))
 
-    badge = f"DuckDB 掃描 {TOTAL_EVENTS:,} 筆事件耗時：{elapsed*1000:.1f} 毫秒"
-    badge_style = {"opacity": 1, "transition": "opacity .5s"}
+    badge = f"⚡ DuckDB 查詢 {elapsed*1000:.0f} ms · 掃描 {kpi[0]:,} 筆"
     return (
         f"{kpi[0]:,}", f"{kpi[1]:,}", f"${kpi[2]:,.0f}", f"{kpi[3]:,}",
         delta_badge(kpi[0], kpi_p[0]), delta_badge(kpi[1], kpi_p[1]),
         delta_badge(kpi[2], kpi_p[2]), delta_badge(kpi[3], kpi_p[3]),
         fig_trend, fig_pie, fig_comp, fig_funnel, rate_items,
-        badge, badge_style, 0, False, 0,
+        badge, 0,
     )
-
-
-# 效能 Badge：資料更新後短暫顯示，數秒後淡出 (不長駐右上角)
-@app.callback(
-    Output("perf-badge",  "style", allow_duplicate=True),
-    Output("badge-timer", "disabled", allow_duplicate=True),
-    Input("badge-timer",  "n_intervals"),
-    prevent_initial_call=True,
-)
-def fade_badge(_n):
-    return {"opacity": 0, "transition": "opacity .8s"}, True
 
 
 # ──────────────────────────────────────────────────────────────
@@ -811,18 +798,21 @@ def refresh_products(mediums, event_names, countries, categories, keyword,
         fig_cat = go.Figure().add_annotation(text="此篩選條件下無商品資料", showarrow=False)
     else:
         cat = cat.iloc[::-1].copy()
-        cat["label"] = cat["category"].map(_short)
         xmax = cat["revenue"].max()
-        fig_cat = px.bar(cat, x="revenue", y="label", orientation="h",
+        # y 用完整(唯一)類別名，避免不同類別截斷後撞名而被疊成一條
+        fig_cat = px.bar(cat, x="revenue", y="category", orientation="h",
                          text="revenue", color="revenue",
                          color_continuous_scale=["#AED6F1", BLUE, NAVY])
         fig_cat.update_traces(texttemplate="$%{text:,.0f}", textposition="outside",
                               textfont_size=10, cliponaxis=False)
         fig_cat.update_coloraxes(showscale=False)
         fig_cat.update_xaxes(range=[0, xmax * 1.22])
+        fig_cat.update_yaxes(tickmode="array", tickvals=cat["category"].tolist(),
+                             ticktext=[_short(c) for c in cat["category"]],
+                             tickfont_size=11)
     fig_cat.update_layout(
         margin=dict(l=10, r=40, t=10, b=10),
-        yaxis=dict(title="", tickfont_size=11), xaxis_title="營收 (USD)",
+        yaxis_title="", xaxis_title="營收 (USD)",
         plot_bgcolor="white", paper_bgcolor="white", font=dict(family="Segoe UI"),
     )
 
@@ -831,18 +821,21 @@ def refresh_products(mediums, event_names, countries, categories, keyword,
         fig_items = go.Figure().add_annotation(text="此篩選條件下無商品資料", showarrow=False)
     else:
         items = items.iloc[::-1].copy()
-        items["label"] = items["item"].map(lambda s: _short(s, 26))
         qmax = items["qty"].max()
-        fig_items = px.bar(items, x="qty", y="label", orientation="h",
+        # y 用完整(唯一)商品名，截斷只作用在顯示的刻度文字，避免同名疊條
+        fig_items = px.bar(items, x="qty", y="item", orientation="h",
                            text="qty", color="qty",
                            color_continuous_scale=["#A9DFBF", "#18BC9C", "#1A7A5E"])
         fig_items.update_traces(texttemplate="%{text:,}", textposition="outside",
                                 textfont_size=10, cliponaxis=False)
         fig_items.update_coloraxes(showscale=False)
         fig_items.update_xaxes(range=[0, qmax * 1.18])
+        fig_items.update_yaxes(tickmode="array", tickvals=items["item"].tolist(),
+                               ticktext=[_short(s, 26) for s in items["item"]],
+                               tickfont_size=11)
     fig_items.update_layout(
         margin=dict(l=10, r=40, t=10, b=10),
-        yaxis=dict(title="", tickfont_size=11), xaxis_title="數量",
+        yaxis_title="", xaxis_title="數量",
         plot_bgcolor="white", paper_bgcolor="white", font=dict(family="Segoe UI"),
     )
 
