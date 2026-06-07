@@ -45,10 +45,36 @@ MEDIUM_OPTIONS = [
         "SELECT DISTINCT traffic_medium FROM events ORDER BY 1 NULLS FIRST"
     ).fetchall()
 ]
+# 國家 / 事件名稱 / 商品類別 下拉選項 (依出現頻率排序)
+COUNTRY_OPTIONS = [
+    {"label": c, "value": c}
+    for (c,) in _init.execute(
+        "SELECT country FROM events WHERE country IS NOT NULL "
+        "GROUP BY 1 ORDER BY count(*) DESC"
+    ).fetchall()
+]
+EVENTNAME_OPTIONS = [
+    {"label": n, "value": n}
+    for (n,) in _init.execute(
+        "SELECT event_name FROM events GROUP BY 1 ORDER BY count(*) DESC"
+    ).fetchall()
+]
+CATEGORY_OPTIONS = [
+    {"label": c, "value": c}
+    for (c,) in _init.execute(
+        "SELECT item_category FROM products "
+        "WHERE item_category IS NOT NULL AND item_category <> '' "
+        "GROUP BY 1 ORDER BY count(*) DESC"
+    ).fetchall()
+]
 MIN_DATE, MAX_DATE = _init.execute(
     "SELECT min(event_date), max(event_date) FROM events"
 ).fetchone()
 _init.close()
+
+# 預設只看最近 30 天，讓「環比 (vs 前期)」一開啟就有前期可比
+DEFAULT_END = MAX_DATE
+DEFAULT_START = max(MIN_DATE, MAX_DATE - timedelta(days=29))
 
 # 轉換漏斗階段 (對應採購生命週期：瀏覽→加入→結帳→成交)
 FUNNEL_STAGES = [
@@ -61,12 +87,22 @@ FUNNEL_STAGES = [
 # ──────────────────────────────────────────────────────────────
 # 1. 查詢輔助
 # ──────────────────────────────────────────────────────────────
-def build_filter(mediums, keyword, date_start=None, date_end=None):
+def build_filter(mediums, keyword, date_start=None, date_end=None,
+                 countries=None, event_names=None):
+    """組出針對 events 別名 e 的 WHERE 條件 (所有查詢共用)。"""
     clauses, params = [], []
     if mediums:
         placeholders = ",".join(["?"] * len(mediums))
         clauses.append(f"COALESCE(e.traffic_medium,'') IN ({placeholders})")
         params.extend(mediums)
+    if countries:
+        placeholders = ",".join(["?"] * len(countries))
+        clauses.append(f"e.country IN ({placeholders})")
+        params.extend(countries)
+    if event_names:
+        placeholders = ",".join(["?"] * len(event_names))
+        clauses.append(f"e.event_name IN ({placeholders})")
+        params.extend(event_names)
     if keyword and keyword.strip():
         kw = f"%{keyword.strip()}%"
         clauses.append(
@@ -175,11 +211,35 @@ control_panel = dbc.Card(
                 id="date-range",
                 min_date_allowed=MIN_DATE,
                 max_date_allowed=MAX_DATE,
-                start_date=MIN_DATE,
-                end_date=MAX_DATE,
+                start_date=DEFAULT_START,
+                end_date=DEFAULT_END,
                 display_format="YYYY-MM-DD",
                 className="mb-3 w-100",
             ),
+        ),
+        html.Label("事件名稱 (Event Name)", className="fw-bold small"),
+        dcc.Dropdown(
+            id="eventname-filter",
+            options=EVENTNAME_OPTIONS,
+            multi=True,
+            placeholder="不限 — 例如 page_view、purchase",
+            className="mb-3",
+        ),
+        html.Label("國家 (Country)", className="fw-bold small"),
+        dcc.Dropdown(
+            id="country-filter",
+            options=COUNTRY_OPTIONS,
+            multi=True,
+            placeholder="不限 — 可複選",
+            className="mb-3",
+        ),
+        html.Label("商品類別 (Item Category · 僅商品分析頁)", className="fw-bold small"),
+        dcc.Dropdown(
+            id="category-filter",
+            options=CATEGORY_OPTIONS,
+            multi=True,
+            placeholder="不限 — 可複選",
+            className="mb-3",
         ),
         html.Label("流量媒介 (Traffic Medium)", className="fw-bold small"),
         dcc.Dropdown(
@@ -255,12 +315,19 @@ tab_events = dbc.Tab(
             ],
             className="g-3 mb-3",
         ),
+        dbc.Card(dbc.CardBody([
+            html.H6([html.I(className="bi bi-list-ol me-2"),
+                     "事件組成 (本區間各事件名稱筆數)"],
+                    className="fw-bold"),
+            dcc.Graph(id="event-comp", config={"displayModeBar": False},
+                      style={"height": "320px"}),
+        ]), className="shadow-sm border-0 mb-3"),
         dbc.Row(
             [
                 dbc.Col(
                     dbc.Card(dbc.CardBody([
                         html.H6([html.I(className="bi bi-funnel me-2"),
-                                 "採購轉換漏斗 (瀏覽→加購→結帳→成交)"],
+                                 "採購轉換漏斗 (不重複使用者 · 逐階段累積)"],
                                 className="fw-bold"),
                         dcc.Graph(id="funnel-chart", config={"displayModeBar": False},
                                   style={"height": "300px"}),
@@ -295,6 +362,7 @@ tab_events = dbc.Tab(
                     {"name": "國家",         "id": "country"},
                     {"name": "裝置",         "id": "device_type"},
                     {"name": "媒介",         "id": "traffic_medium"},
+                    {"name": "來源",         "id": "traffic_source"},
                     {"name": "行銷活動",     "id": "campaign_name"},
                     {"name": "交易 ID",      "id": "transaction_id"},
                     {"name": "收益 (USD)", "id": "total_purchase_revenue"},
@@ -324,7 +392,7 @@ tab_products = dbc.Tab(
                 dbc.Col(
                     dbc.Card(dbc.CardBody([
                         html.H6([html.I(className="bi bi-bar-chart-line me-2"),
-                                 "前五大商品類別營收 (即時跨表 JOIN)"],
+                                 "前五大商品類別營收 (已購買商品)"],
                                 className="fw-bold"),
                         dcc.Graph(id="join-bar", config={"displayModeBar": False},
                                   style={"height": "300px"}),
@@ -334,7 +402,7 @@ tab_products = dbc.Tab(
                 dbc.Col(
                     dbc.Card(dbc.CardBody([
                         html.H6([html.I(className="bi bi-bar-chart me-2"),
-                                 "前十大熱銷商品 (數量)"],
+                                 "前十大熱銷商品 (已售數量)"],
                                 className="fw-bold"),
                         dcc.Graph(id="top-items-bar", config={"displayModeBar": False},
                                   style={"height": "300px"}),
@@ -346,7 +414,7 @@ tab_products = dbc.Tab(
         ),
         dbc.Card(dbc.CardBody([
             html.H6([html.I(className="bi bi-table me-2"),
-                     "商品明細 (後端分頁 · 每頁 20 筆)"],
+                     "已購買商品明細 (後端分頁 · 每頁 20 筆)"],
                     className="fw-bold"),
             dash_table.DataTable(
                 id="products-table",
@@ -393,6 +461,8 @@ server = app.server
 app.layout = dbc.Container(
     [
         banner,
+        dcc.Interval(id="badge-timer", interval=3500, n_intervals=0,
+                     max_intervals=1, disabled=True),
         dbc.Row(
             [
                 dbc.Col(control_panel, md=3),
@@ -445,18 +515,25 @@ KPI_SQL = """
     Output("kpi-orders-delta",  "children"),
     Output("trend-line",   "figure"),
     Output("device-pie",   "figure"),
+    Output("event-comp",   "figure"),
     Output("funnel-chart", "figure"),
     Output("funnel-rates", "children"),
     Output("perf-badge",   "children"),
+    Output("perf-badge",   "style"),
+    Output("badge-timer",  "n_intervals"),
+    Output("badge-timer",  "disabled"),
     Output("events-table", "page_current"),
-    Input("medium-filter", "value"),
-    Input("keyword",       "value"),
-    Input("date-range",    "start_date"),
-    Input("date-range",    "end_date"),
+    Input("medium-filter",    "value"),
+    Input("eventname-filter", "value"),
+    Input("country-filter",   "value"),
+    Input("keyword",          "value"),
+    Input("date-range",       "start_date"),
+    Input("date-range",       "end_date"),
 )
-def refresh_events(mediums, keyword, date_start, date_end):
+def refresh_events(mediums, event_names, countries, keyword, date_start, date_end):
     t0 = time.perf_counter()
-    where, params = build_filter(mediums, keyword, date_start, date_end)
+    where, params = build_filter(mediums, keyword, date_start, date_end,
+                                 countries, event_names)
     con = db()
 
     # 本期 KPI
@@ -465,7 +542,8 @@ def refresh_events(mediums, keyword, date_start, date_end):
     # 前期 KPI (環比) ── 等長且緊鄰的前一區間
     prev_start, prev_end = previous_period(date_start, date_end)
     if prev_start:
-        where_p, params_p = build_filter(mediums, keyword, prev_start, prev_end)
+        where_p, params_p = build_filter(mediums, keyword, prev_start, prev_end,
+                                         countries, event_names)
         kpi_p = con.execute(KPI_SQL.format(where=where_p), params_p).fetchone()
     else:
         kpi_p = (None, None, None, None)
@@ -492,21 +570,53 @@ def refresh_events(mediums, keyword, date_start, date_end):
         params,
     ).fetchdf()
 
-    # 轉換漏斗各階段事件數
-    stage_keys = [k for k, _ in FUNNEL_STAGES]
-    placeholders = ",".join(["?"] * len(stage_keys))
-    fwhere = (where + " AND " if where else "WHERE ") + f"e.event_name IN ({placeholders})"
-    frows = con.execute(
-        f"SELECT e.event_name, count(*) FROM events e {fwhere} GROUP BY 1",
-        params + stage_keys,
-    ).fetchall()
-    counts = {k: 0 for k in stage_keys}
-    for name, c in frows:
-        counts[name] = c
-    stage_vals = [counts[k] for k in stage_keys]
+    # 事件組成 (各事件名稱筆數)
+    comp = con.execute(
+        f"""
+        SELECT e.event_name AS name, count(*) AS cnt
+        FROM events e {where}
+        GROUP BY 1 ORDER BY cnt DESC
+        """,
+        params,
+    ).fetchdf()
+
+    # ── 轉換漏斗：不重複使用者、逐階段累積 (保證單調遞減，故不套用事件名稱篩選) ──
+    fwhere, fparams = build_filter(mediums, keyword, date_start, date_end,
+                                   countries, None)
+    funnel = con.execute(
+        f"""
+        WITH u AS (
+            SELECT e.user_pseudo_id,
+                   max(CASE WHEN e.event_name='view_item'      THEN 1 ELSE 0 END) AS s1,
+                   max(CASE WHEN e.event_name='add_to_cart'    THEN 1 ELSE 0 END) AS s2,
+                   max(CASE WHEN e.event_name='begin_checkout' THEN 1 ELSE 0 END) AS s3,
+                   max(CASE WHEN e.event_name='purchase'       THEN 1 ELSE 0 END) AS s4
+            FROM events e {fwhere}
+            GROUP BY 1
+        )
+        SELECT COALESCE(sum(s1),0), COALESCE(sum(s1*s2),0),
+               COALESCE(sum(s1*s2*s3),0), COALESCE(sum(s1*s2*s3*s4),0)
+        FROM u
+        """,
+        fparams,
+    ).fetchone()
+    stage_vals = [int(v) for v in funnel]
     stage_labels = [lbl for _, lbl in FUNNEL_STAGES]
 
     elapsed = time.perf_counter() - t0
+
+    # 事件組成橫條圖
+    fig_comp = px.bar(comp, x="cnt", y="name", orientation="h", text="cnt",
+                      color="cnt", color_continuous_scale=["#D6EAF8", BLUE, NAVY])
+    fig_comp.update_traces(texttemplate="%{text:,}", textposition="outside",
+                           textfont_size=10, cliponaxis=False)
+    fig_comp.update_coloraxes(showscale=False)
+    fig_comp.update_layout(
+        margin=dict(l=10, r=60, t=10, b=10),
+        yaxis=dict(title="", autorange="reversed", tickfont_size=11),
+        xaxis_title="筆數", plot_bgcolor="white", paper_bgcolor="white",
+        font=dict(family="Segoe UI"),
+    )
 
     # ── 雙軸時序圖 (事件量長條 + 7日均線 + 收益折線) ──
     fig_trend = go.Figure()
@@ -540,7 +650,7 @@ def refresh_events(mediums, keyword, date_start, date_end):
                           paper_bgcolor="white", font=dict(family="Segoe UI"),
                           showlegend=False)
 
-    # ── 轉換漏斗圖 ──
+    # ── 轉換漏斗圖 (不重複使用者) ──
     fig_funnel = go.Figure(go.Funnel(
         y=stage_labels, x=stage_vals,
         textinfo="value+percent initial",
@@ -552,7 +662,7 @@ def refresh_events(mediums, keyword, date_start, date_end):
         paper_bgcolor="white", font=dict(family="Segoe UI"),
     )
 
-    # ── 各階段轉換率明細 ──
+    # ── 各階段轉換率明細 (巢狀使用者，必 ≤ 100%) ──
     rate_items = []
     for i in range(1, len(stage_vals)):
         prev_v, cur_v = stage_vals[i - 1], stage_vals[i]
@@ -575,38 +685,105 @@ def refresh_events(mediums, keyword, date_start, date_end):
     ]))
 
     badge = f"DuckDB 掃描 {TOTAL_EVENTS:,} 筆事件耗時：{elapsed*1000:.1f} 毫秒"
+    badge_style = {"opacity": 1, "transition": "opacity .5s"}
     return (
         f"{kpi[0]:,}", f"{kpi[1]:,}", f"${kpi[2]:,.0f}", f"{kpi[3]:,}",
         delta_badge(kpi[0], kpi_p[0]), delta_badge(kpi[1], kpi_p[1]),
         delta_badge(kpi[2], kpi_p[2]), delta_badge(kpi[3], kpi_p[3]),
-        fig_trend, fig_pie, fig_funnel, rate_items, badge, 0,
+        fig_trend, fig_pie, fig_comp, fig_funnel, rate_items,
+        badge, badge_style, 0, False, 0,
     )
+
+
+# 效能 Badge：資料更新後短暫顯示，數秒後淡出 (不長駐右上角)
+@app.callback(
+    Output("perf-badge",  "style", allow_duplicate=True),
+    Output("badge-timer", "disabled", allow_duplicate=True),
+    Input("badge-timer",  "n_intervals"),
+    prevent_initial_call=True,
+)
+def fade_badge(_n):
+    return {"opacity": 0, "transition": "opacity .8s"}, True
 
 
 # ──────────────────────────────────────────────────────────────
 # 5. Callback：商品頁圖表
 # ──────────────────────────────────────────────────────────────
+def build_product_where(mediums, keyword, date_start, date_end,
+                        countries, categories):
+    """商品分析專用 WHERE：只計 purchase 事件，事件級篩選以 EXISTS 半連接套用，
+    避免 events×products 多對多 JOIN 造成營收/數量被重複加總而暴增。"""
+    pclauses = ["p.event_name = 'purchase'"]
+    pparams = []
+    if date_start:
+        pclauses.append("p.event_date >= ?")
+        pparams.append(date_start)
+    if date_end:
+        pclauses.append("p.event_date <= ?")
+        pparams.append(date_end)
+    if categories:
+        ph = ",".join(["?"] * len(categories))
+        pclauses.append(f"p.item_category IN ({ph})")
+        pparams += list(categories)
+
+    eclauses, eparams = [], []
+    if mediums:
+        ph = ",".join(["?"] * len(mediums))
+        eclauses.append(f"COALESCE(e.traffic_medium,'') IN ({ph})")
+        eparams += mediums
+    if countries:
+        ph = ",".join(["?"] * len(countries))
+        eclauses.append(f"e.country IN ({ph})")
+        eparams += countries
+    if keyword and keyword.strip():
+        kw = f"%{keyword.strip()}%"
+        eclauses.append(
+            "(e.campaign_name ILIKE ? OR e.traffic_source ILIKE ? OR e.country ILIKE ?)"
+        )
+        eparams += [kw, kw, kw]
+
+    exists = ""
+    if eclauses:
+        exists = (
+            " AND EXISTS (SELECT 1 FROM events e "
+            "WHERE e.user_pseudo_id = p.user_pseudo_id "
+            "AND e.event_datetime = p.event_datetime AND "
+            + " AND ".join(eclauses) + ")"
+        )
+    where = "WHERE " + " AND ".join(pclauses) + exists
+    return where, pparams + eparams
+
+
+def _short(s, n=22):
+    """截斷過長字串，避免長條圖 y 軸標籤擠壓繪圖區。"""
+    s = str(s)
+    return s if len(s) <= n else s[: n - 1] + "…"
+
+
 @app.callback(
     Output("join-bar",      "figure"),
     Output("top-items-bar", "figure"),
     Output("products-table", "page_current"),
-    Input("medium-filter",  "value"),
-    Input("keyword",        "value"),
-    Input("date-range",     "start_date"),
-    Input("date-range",     "end_date"),
+    Input("medium-filter",    "value"),
+    Input("eventname-filter", "value"),
+    Input("country-filter",   "value"),
+    Input("category-filter",  "value"),
+    Input("keyword",          "value"),
+    Input("date-range",       "start_date"),
+    Input("date-range",       "end_date"),
 )
-def refresh_products(mediums, keyword, date_start, date_end):
-    where, params = build_filter(mediums, keyword, date_start, date_end)
+def refresh_products(mediums, event_names, countries, categories, keyword,
+                     date_start, date_end):
+    where, params = build_product_where(mediums, keyword, date_start, date_end,
+                                        countries, categories)
     con = db()
 
-    # 前五大類別營收 (JOIN)
+    # 前五大類別營收 (僅 purchase，EXISTS 半連接套篩選)
     cat = con.execute(
         f"""
         SELECT COALESCE(NULLIF(p.item_category, ''), '(未分類)') AS category,
                sum(p.item_total_revenue) AS revenue
         FROM products p
-        JOIN events e ON p.user_pseudo_id = e.user_pseudo_id
-                      AND p.event_datetime = e.event_datetime
         {where}
         GROUP BY 1
         HAVING sum(p.item_total_revenue) > 0
@@ -615,14 +792,12 @@ def refresh_products(mediums, keyword, date_start, date_end):
         params,
     ).fetchdf()
 
-    # 前十熱銷商品 (數量)
+    # 前十熱銷商品 (已售數量)
     items = con.execute(
         f"""
         SELECT COALESCE(NULLIF(p.item_name, ''), p.item_id) AS item,
                sum(p.item_quantity) AS qty
         FROM products p
-        JOIN events e ON p.user_pseudo_id = e.user_pseudo_id
-                      AND p.event_datetime = e.event_datetime
         {where}
         GROUP BY 1
         HAVING sum(p.item_quantity) > 0
@@ -635,15 +810,19 @@ def refresh_products(mediums, keyword, date_start, date_end):
     if cat.empty:
         fig_cat = go.Figure().add_annotation(text="此篩選條件下無商品資料", showarrow=False)
     else:
-        cat = cat.iloc[::-1]
-        fig_cat = px.bar(cat, x="revenue", y="category", orientation="h",
+        cat = cat.iloc[::-1].copy()
+        cat["label"] = cat["category"].map(_short)
+        xmax = cat["revenue"].max()
+        fig_cat = px.bar(cat, x="revenue", y="label", orientation="h",
                          text="revenue", color="revenue",
                          color_continuous_scale=["#AED6F1", BLUE, NAVY])
-        fig_cat.update_traces(texttemplate="$%{text:,.0f}", textposition="outside")
+        fig_cat.update_traces(texttemplate="$%{text:,.0f}", textposition="outside",
+                              textfont_size=10, cliponaxis=False)
         fig_cat.update_coloraxes(showscale=False)
+        fig_cat.update_xaxes(range=[0, xmax * 1.22])
     fig_cat.update_layout(
-        margin=dict(l=10, r=30, t=10, b=10),
-        yaxis_title="", xaxis_title="營收 (USD)",
+        margin=dict(l=10, r=40, t=10, b=10),
+        yaxis=dict(title="", tickfont_size=11), xaxis_title="營收 (USD)",
         plot_bgcolor="white", paper_bgcolor="white", font=dict(family="Segoe UI"),
     )
 
@@ -651,15 +830,19 @@ def refresh_products(mediums, keyword, date_start, date_end):
     if items.empty:
         fig_items = go.Figure().add_annotation(text="此篩選條件下無商品資料", showarrow=False)
     else:
-        items = items.iloc[::-1]
-        fig_items = px.bar(items, x="qty", y="item", orientation="h",
+        items = items.iloc[::-1].copy()
+        items["label"] = items["item"].map(lambda s: _short(s, 26))
+        qmax = items["qty"].max()
+        fig_items = px.bar(items, x="qty", y="label", orientation="h",
                            text="qty", color="qty",
                            color_continuous_scale=["#A9DFBF", "#18BC9C", "#1A7A5E"])
-        fig_items.update_traces(texttemplate="%{text:,}", textposition="outside")
+        fig_items.update_traces(texttemplate="%{text:,}", textposition="outside",
+                                textfont_size=10, cliponaxis=False)
         fig_items.update_coloraxes(showscale=False)
+        fig_items.update_xaxes(range=[0, qmax * 1.18])
     fig_items.update_layout(
-        margin=dict(l=10, r=30, t=10, b=10),
-        yaxis_title="", xaxis_title="數量",
+        margin=dict(l=10, r=40, t=10, b=10),
+        yaxis=dict(title="", tickfont_size=11), xaxis_title="數量",
         plot_bgcolor="white", paper_bgcolor="white", font=dict(family="Segoe UI"),
     )
 
@@ -675,13 +858,17 @@ def refresh_products(mediums, keyword, date_start, date_end):
     Input("events-table",  "page_current"),
     Input("events-table",  "page_size"),
     Input("medium-filter", "value"),
+    Input("eventname-filter", "value"),
+    Input("country-filter",   "value"),
     Input("keyword",       "value"),
     Input("date-range",    "start_date"),
     Input("date-range",    "end_date"),
 )
-def paginate_events(page_current, page_size, mediums, keyword, date_start, date_end):
+def paginate_events(page_current, page_size, mediums, event_names, countries,
+                    keyword, date_start, date_end):
     page_current = page_current or 0
-    where, params = build_filter(mediums, keyword, date_start, date_end)
+    where, params = build_filter(mediums, keyword, date_start, date_end,
+                                 countries, event_names)
     con = db()
     total = con.execute(f"SELECT count(*) FROM events e {where}", params).fetchone()[0]
     page_count = max(1, -(-total // page_size))
@@ -694,6 +881,7 @@ def paginate_events(page_current, page_size, mediums, keyword, date_start, date_
                COALESCE(e.country, '-')                           AS country,
                COALESCE(e.device_type, '-')                       AS device_type,
                COALESCE(NULLIF(e.traffic_medium, ''), '(direct)') AS traffic_medium,
+               COALESCE(NULLIF(e.traffic_source, ''), '-')        AS traffic_source,
                COALESCE(NULLIF(e.campaign_name, ''), '-')         AS campaign_name,
                COALESCE(e.transaction_id, '-')                    AS transaction_id,
                ROUND(COALESCE(e.total_purchase_revenue, 0), 2)    AS total_purchase_revenue
@@ -715,23 +903,22 @@ def paginate_events(page_current, page_size, mediums, keyword, date_start, date_
     Input("products-table", "page_current"),
     Input("products-table", "page_size"),
     Input("medium-filter",  "value"),
+    Input("eventname-filter", "value"),
+    Input("country-filter",   "value"),
+    Input("category-filter",  "value"),
     Input("keyword",        "value"),
     Input("date-range",     "start_date"),
     Input("date-range",     "end_date"),
 )
-def paginate_products(page_current, page_size, mediums, keyword, date_start, date_end):
+def paginate_products(page_current, page_size, mediums, event_names, countries,
+                      categories, keyword, date_start, date_end):
     page_current = page_current or 0
-    where, params = build_filter(mediums, keyword, date_start, date_end)
+    where, params = build_product_where(mediums, keyword, date_start, date_end,
+                                        countries, categories)
     con = db()
 
     total = con.execute(
-        f"""
-        SELECT count(*) FROM products p
-        JOIN events e ON p.user_pseudo_id = e.user_pseudo_id
-                      AND p.event_datetime = e.event_datetime
-        {where}
-        """,
-        params,
+        f"SELECT count(*) FROM products p {where}", params
     ).fetchone()[0]
     page_count = max(1, -(-total // page_size))
 
@@ -747,8 +934,6 @@ def paginate_products(page_current, page_size, mediums, keyword, date_start, dat
                COALESCE(p.item_quantity, 0)                    AS item_quantity,
                ROUND(COALESCE(p.item_total_revenue, 0), 2)     AS item_total_revenue
         FROM products p
-        JOIN events e ON p.user_pseudo_id = e.user_pseudo_id
-                      AND p.event_datetime = e.event_datetime
         {where}
         ORDER BY p.event_datetime DESC
         LIMIT {int(page_size)} OFFSET {int(page_current) * int(page_size)}
@@ -760,15 +945,18 @@ def paginate_products(page_current, page_size, mediums, keyword, date_start, dat
 
 # ── 重設按鈕 ──
 @app.callback(
-    Output("medium-filter", "value"),
-    Output("keyword",       "value"),
-    Output("date-range",    "start_date"),
-    Output("date-range",    "end_date"),
-    Input("reset-btn",      "n_clicks"),
+    Output("medium-filter",   "value"),
+    Output("eventname-filter", "value"),
+    Output("country-filter",  "value"),
+    Output("category-filter", "value"),
+    Output("keyword",         "value"),
+    Output("date-range",      "start_date"),
+    Output("date-range",      "end_date"),
+    Input("reset-btn",        "n_clicks"),
     prevent_initial_call=True,
 )
 def reset(_):
-    return None, "", MIN_DATE, MAX_DATE
+    return None, None, None, None, "", DEFAULT_START, DEFAULT_END
 
 
 if __name__ == "__main__":
