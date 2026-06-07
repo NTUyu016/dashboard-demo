@@ -72,11 +72,11 @@ MIN_DATE, MAX_DATE = _init.execute(
 ).fetchone()
 _init.close()
 
-# 預設只看最近 30 天，讓「環比 (vs 前期)」一開啟就有前期可比
+# 預設只看最近 30 天，讓「與前期比較」一開啟就有對照基準
 DEFAULT_END = MAX_DATE
 DEFAULT_START = max(MIN_DATE, MAX_DATE - timedelta(days=29))
 
-# 轉換漏斗階段 (對應採購生命週期：瀏覽→加入→結帳→成交)
+# 轉換漏斗階段：瀏覽→加入→結帳→成交
 FUNNEL_STAGES = [
     ("view_item",      "瀏覽商品"),
     ("add_to_cart",    "加入購物車"),
@@ -129,7 +129,7 @@ def _as_date(v):
 
 
 def previous_period(date_start, date_end):
-    """回傳與目前區間等長、緊鄰其前的『前期』日期區間，供環比計算。"""
+    """回傳與目前區間等長、緊鄰其前的『前期』日期區間，供與前期比較使用。"""
     if not date_start or not date_end:
         return None, None
     ds = _as_date(date_start)
@@ -157,7 +157,7 @@ def period_label(date_start, date_end):
 
 
 def delta_badge(cur, prev, label="前期"):
-    """產生環比變化文字 (▲/▼ 百分比)，前期無資料時顯示『—』。"""
+    """產生與前期比較的變化文字 (▲/▼ 百分比)，前期無資料時顯示『—』。"""
     if not prev:
         return html.Span("— 無前期可比", className="text-muted")
     pct = (cur - prev) / prev * 100
@@ -350,7 +350,7 @@ tab_events = dbc.Tab(
                 dbc.Col(
                     dbc.Card(dbc.CardBody([
                         html.H6([html.I(className="bi bi-funnel me-2"),
-                                 "採購轉換漏斗 (不重複使用者 · 逐階段累積)"],
+                                 "轉換漏斗 (不重複使用者 · 逐階段累積)"],
                                 className="fw-bold"),
                         dcc.Graph(id="funnel-chart", config={"displayModeBar": False},
                                   style={"height": "300px"}),
@@ -506,7 +506,7 @@ app.layout = dbc.Container(
         ),
         html.Footer(
             "資料來源：Google GA4 obfuscated sample ecommerce（BigQuery 公開資料集）"
-            "  ·  DuckDB + Parquet  ·  100% 地端",
+            "  ·  DuckDB + Parquet",
             className="text-center text-muted small my-4",
         ),
     ],
@@ -560,7 +560,7 @@ def refresh_events(mediums, event_names, countries, keyword, date_start, date_en
     # 本期 KPI
     kpi = con.execute(KPI_SQL.format(where=where), params).fetchone()
 
-    # 前期 KPI (環比) ── 與目前區間「等長且緊鄰其前」的一段
+    # 前期 KPI (與前期比較) ── 與目前區間「等長且緊鄰其前」的一段
     prev_start, prev_end = previous_period(date_start, date_end)
     plabel = period_label(date_start, date_end)
     if prev_start:
@@ -569,17 +569,17 @@ def refresh_events(mediums, event_names, countries, keyword, date_start, date_en
         kpi_p = con.execute(KPI_SQL.format(where=where_p), params_p).fetchone()
         if kpi_p[0]:
             compare_note = (
-                f"📊 KPI 下方的環比＝本區間 vs 「{plabel}」"
+                f"📊 KPI 下方的變化＝本區間 vs 「{plabel}」"
                 f"（{prev_start} ~ {prev_end}，與目前區間等長緊鄰）"
             )
         else:
             compare_note = (
-                f"📊 環比：「{plabel}」（{prev_start} ~ {prev_end}）落在資料範圍外，"
-                f"故顯示「無前期可比」。把日期區間調短即可看到環比。"
+                f"📊 「{plabel}」（{prev_start} ~ {prev_end}）落在資料範圍外，"
+                f"故顯示「無前期可比」。把日期區間調短即可看到與前期的比較。"
             )
     else:
         kpi_p = (None, None, None, None)
-        compare_note = "📊 環比：尚未選定日期區間。"
+        compare_note = "📊 尚未選定日期區間。"
 
     # 時序趨勢 (+ 7 日移動平均)
     trend = con.execute(

@@ -1,9 +1,9 @@
 # duckdb_compare — 報告 / Report
 
 ## 簡介 / Overview
-本專案包含 `duckdb_compare.py`，用以比較 SQLite（row-store）與 DuckDB（columnar）在 OLAP 聚合查詢上的效能差異，資料為模擬採購資料（合成且可重現）。
+本專案包含 `duckdb_compare.py`，用以比較 SQLite（row-store）與 DuckDB（columnar）在 OLAP 聚合查詢上的效能差異，資料為合成且可重現的交易資料。
 
-This repository contains `duckdb_compare.py`, a script to compare OLAP aggregation query performance between SQLite (row-store) and DuckDB (columnar) using synthetic, reproducible procurement data.
+This repository contains `duckdb_compare.py`, a script to compare OLAP aggregation query performance between SQLite (row-store) and DuckDB (columnar) using synthetic, reproducible transaction data.
 
 ## 資料結構 / Data schema
 - `purchase_id`: integer (unique id)
