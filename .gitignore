@@ -19,3 +19,6 @@ build/
 # OS
 .DS_Store
 Thumbs.db
+
+# 個人面試筆記 (本機私用，不上傳)
+doc/DESIGN.md

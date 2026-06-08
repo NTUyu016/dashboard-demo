@@ -1,7 +1,13 @@
 # -*- coding: utf-8 -*-
 """
 ETL：從 BigQuery 公開資料集 (GA4 obfuscated sample ecommerce)
-下載事件表與產品表，落地為本地 Parquet 檔 (Snappy 壓縮)。
+下載並落地為本地 Parquet 檔 (Snappy 壓縮)。產出三張表：
+    - events_data.parquet           逐事件明細
+    - products_data.parquet         逐商品明細 (items 展開)
+    - first_visit_users_data.parquet 新用戶 (first_visit) + 後續轉換旅程標記
+
+SQL 全部抽到 sql/ 資料夾下的 .sql 公版檔，以 ${START} / ${END} 為日期參數，
+不再 hard-code 在本檔，方便維護與版本控管。
 
 執行：
     python etl.py            # 預設抓 2021-01-01 單日
@@ -10,6 +16,7 @@ ETL：從 BigQuery 公開資料集 (GA4 obfuscated sample ecommerce)
 第一次執行會跳出瀏覽器要求 Google OAuth 授權。
 """
 import math
+import os
 import sys
 import time
 
@@ -20,63 +27,23 @@ import pyarrow.parquet as pq
 from tqdm import tqdm
 
 PROJECT_ID = "gen-lang-client-0283218135"
-OUT_DIR = "."
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+SQL_DIR = os.path.join(BASE_DIR, "sql")
+OUT_DIR = BASE_DIR
 
 # ---- 日期區間 (對應 SQL 的 _TABLE_SUFFIX) ----
 START = sys.argv[1] if len(sys.argv) > 1 else "20210101"
 END = sys.argv[2] if len(sys.argv) > 2 else START
 
-EVENTS_SQL = f"""
-SELECT
-    PARSE_DATE('%Y%m%d', event_date)            AS event_date,
-    TIMESTAMP_MICROS(event_timestamp)           AS event_datetime,
-    event_name,
-    event_value_in_usd,
-    user_pseudo_id,
-    geo.country                                  AS country,
-    geo.region                                   AS region,
-    geo.city                                     AS city,
-    geo.sub_continent                            AS sub_continent,
-    geo.continent                                AS continent,
-    device.category                              AS device_type,
-    device.operating_system                      AS os,
-    device.web_info.browser                      AS browser,
-    device.language                              AS device_language,
-    device.mobile_brand_name                     AS mobile_brand,
-    traffic_source.name                          AS campaign_name,
-    traffic_source.medium                        AS traffic_medium,
-    traffic_source.source                        AS traffic_source,
-    ecommerce.total_item_quantity                AS total_items_count,
-    ecommerce.purchase_revenue_in_usd            AS total_purchase_revenue,
-    ecommerce.transaction_id                     AS transaction_id,
-    ecommerce.unique_items                        AS unique_items_count
-FROM `bigquery-public-data.ga4_obfuscated_sample_ecommerce.events_*`
-WHERE _TABLE_SUFFIX BETWEEN '{START}' AND '{END}'
-"""
 
-PRODUCTS_SQL = f"""
-SELECT
-    PARSE_DATE('%Y%m%d', event_date)            AS event_date,
-    user_pseudo_id,
-    TIMESTAMP_MICROS(event_timestamp)           AS event_datetime,
-    event_name,
-    i.item_id                                    AS item_id,
-    i.item_name                                  AS item_name,
-    i.item_brand                                 AS item_brand,
-    i.item_variant                               AS item_variant,
-    i.item_category                              AS item_category,
-    i.item_category2                             AS item_category2,
-    i.price                                       AS item_price,
-    i.quantity                                    AS item_quantity,
-    (i.price * i.quantity)                       AS item_total_revenue,
-    i.item_revenue                                AS item_reported_revenue,
-    i.coupon                                      AS item_coupon_code,
-    i.affiliation                                 AS store_affiliation,
-    i.location_id                                 AS location_id
-FROM `bigquery-public-data.ga4_obfuscated_sample_ecommerce.events_*`
-CROSS JOIN UNNEST(items) AS i
-WHERE _TABLE_SUFFIX BETWEEN '{START}' AND '{END}'
-"""
+def load_sql(name: str, **params) -> str:
+    """讀取 sql/<name>.sql 公版，將 ${KEY} 佔位符換成實際參數值。"""
+    path = os.path.join(SQL_DIR, f"{name}.sql")
+    with open(path, "r", encoding="utf-8") as f:
+        sql = f.read()
+    for key, val in params.items():
+        sql = sql.replace(f"${{{key}}}", str(val))
+    return sql
 
 
 def write_parquet_with_progress(df: pd.DataFrame, path: str, chunk_size: int = 200_000):
@@ -98,7 +65,7 @@ def extract(name: str, sql: str, out: str):
     df = pandas_gbq.read_gbq(sql, project_id=PROJECT_ID, progress_bar_type="tqdm")
     print(f"[{name}]     取回 {len(df):,} 筆，下載耗時 {time.perf_counter() - t0:.1f}s")
 
-    path = f"{OUT_DIR}/{out}"
+    path = os.path.join(OUT_DIR, out)
     print(f"[{name}] 2/2 寫出 Parquet（Snappy 壓縮）...")
     t1 = time.perf_counter()
     write_parquet_with_progress(df, path)
@@ -108,6 +75,15 @@ def extract(name: str, sql: str, out: str):
 
 if __name__ == "__main__":
     print(f"日期區間：{START} ~ {END}  |  project_id={PROJECT_ID}")
-    extract("events", EVENTS_SQL, "events_data.parquet")
-    extract("products", PRODUCTS_SQL, "products_data.parquet")
+
+    extract("events",   load_sql("events",   START=START, END=END), "events_data.parquet")
+    extract("products", load_sql("products", START=START, END=END), "products_data.parquet")
+
+    fv = extract("first_visit", load_sql("first_visit", START=START, END=END),
+                 "first_visit_users_data.parquet")
+    if len(fv):
+        conv = fv["did_purchase"].mean() * 100
+        print(f"\n[摘要] 新用戶 {len(fv):,} 人，其中曾購買 {int(fv['did_purchase'].sum()):,} 人"
+              f"（新用戶轉換率 {conv:.2f}%）")
+
     print("\n[OK] ETL 完成")
