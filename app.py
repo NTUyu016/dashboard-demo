@@ -18,6 +18,8 @@ import plotly.graph_objects as go
 from dash import Dash, Input, Output, dash_table, dcc, html
 import dash_bootstrap_components as dbc
 
+import warehouse
+
 # ──────────────────────────────────────────────────────────────
 # 0. 資料來源 & DuckDB 連線
 # ──────────────────────────────────────────────────────────────
@@ -31,34 +33,25 @@ P = PRODUCTS_PARQUET
 N = NEWUSER_PARQUET
 
 
-# ── 效能優化（方案 B：精簡欄位的記憶體常駐表）──────────────────
-# 啟動時建立「單一常駐連線」，把 events / products 以「只挑儀表板實際用到的
-# 欄位」(而非 SELECT *) 物化進記憶體。如此每個查詢直接打記憶體裡的欄式資料，
-# 不再每次 callback 重連線 + 重讀 / 重解壓 parquet。
-#   - 為何不用 VIEW：VIEW 不常駐，每次查詢都回磁碟重讀 parquet（實測約 3 倍慢）。
-#   - 為何精簡欄位：相比 SELECT * 全量載入，記憶體佔用明顯較低，速度不受影響。
-#   - 為何不做預聚合彙總表：本 app 有 free-text 關鍵字搜尋與 COUNT(DISTINCT)
-#     （非可加總）KPI，預聚合無法忠實重現結果，故改採精簡欄位明細表。
-_EVENT_COLS = (
-    "event_date, event_datetime, event_name, country, device_type, "
-    "traffic_medium, traffic_source, campaign_name, transaction_id, "
-    "total_purchase_revenue, user_pseudo_id"
-)
-_PRODUCT_COLS = (
-    "event_date, event_datetime, event_name, item_id, item_name, item_brand, "
-    "item_category, item_price, item_quantity, item_total_revenue, user_pseudo_id"
-)
+# ── 效能設計：開啟「ETL 預先物化好的持久化 DuckDB 檔」(唯讀) ──────
+# 物化邏輯已移到 ETL 階段 (見 warehouse.build_warehouse)，產出 ga4.duckdb。
+# app 啟動只「唯讀開檔」，不再每次重建 1.4GB → 啟動接近即時。
+#   - 唯讀檔可被多進程 (多 gunicorn worker) 同時開啟、共享 OS page cache，
+#     不會每個進程各自重建、記憶體翻倍。
+#   - 若 ga4.duckdb 不存在 (例如只跑過舊版 etl 只有 parquet)，這裡一次性建好再開。
+DB_PATH = os.path.join(BASE_DIR, warehouse.DB_FILENAME)
+if not os.path.exists(DB_PATH):
+    print(f"[app] 未找到 {warehouse.DB_FILENAME}，從 Parquet 一次性建立...")
+    warehouse.build_warehouse(DB_PATH, E, P, N)
 
-CON = duckdb.connect(database=":memory:")
-CON.execute(f"CREATE TABLE events   AS SELECT {_EVENT_COLS}   FROM '{E}'")
-CON.execute(f"CREATE TABLE products AS SELECT {_PRODUCT_COLS} FROM '{P}'")
+CON = duckdb.connect(DB_PATH, read_only=True)
 
 
 def db():
-    """回傳共用常駐連線的執行緒安全游標。
+    """回傳共用唯讀連線的執行緒安全游標。
 
-    資料已常駐記憶體，cursor() 衍生的游標可在 Dash 多執行緒 callback 下併發，
-    且不再重讀 parquet —— 取代了原本「每次 callback 重建連線」的高成本做法。
+    資料已由 ETL 物化進 ga4.duckdb，cursor() 衍生的游標可在 Dash 多執行緒
+    callback 下併發查詢；唯讀模式允許多進程同時開啟同一檔。
     """
     return CON.cursor()
 
@@ -100,16 +93,10 @@ MIN_DATE, MAX_DATE = CON.execute(
     "SELECT min(event_date), max(event_date) FROM events"
 ).fetchone()
 
-# ── 新用戶 (first_visit) 表：由 etl.py 產出，可能尚未存在故加保護 ──
-# 一列 = 一位首訪新用戶，已含「是否購買 / 首購金額 / 首購距首訪天數」轉換標記。
-_NEWUSER_COLS = (
-    "first_visit_date, country, continent, device_type, os, "
-    "traffic_medium, traffic_source, campaign_name, "
-    "did_purchase, purchase_revenue_total, purchase_count, days_to_first_purchase"
-)
-NEWUSER_AVAILABLE = os.path.exists(NEWUSER_PARQUET)
-if NEWUSER_AVAILABLE:
-    CON.execute(f"CREATE TABLE newusers AS SELECT {_NEWUSER_COLS} FROM '{N}'")
+# ── 新用戶 (first_visit) 表：可能尚未產出，故檢查倉儲中是否有此表 ──
+NEWUSER_AVAILABLE = CON.execute(
+    "SELECT count(*) FROM information_schema.tables WHERE table_name = 'newusers'"
+).fetchone()[0] > 0
 
 # 預設只看最近 30 天，讓「與前期比較」一開啟就有對照基準
 DEFAULT_END = MAX_DATE

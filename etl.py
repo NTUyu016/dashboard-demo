@@ -26,6 +26,8 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 from tqdm import tqdm
 
+import warehouse
+
 PROJECT_ID = "gen-lang-client-0283218135"
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SQL_DIR = os.path.join(BASE_DIR, "sql")
@@ -85,5 +87,16 @@ if __name__ == "__main__":
         conv = fv["did_purchase"].mean() * 100
         print(f"\n[摘要] 新用戶 {len(fv):,} 人，其中曾購買 {int(fv['did_purchase'].sum()):,} 人"
               f"（新用戶轉換率 {conv:.2f}%）")
+
+    # 物化成持久化 DuckDB 檔，讓儀表板啟動時只需唯讀開檔 (不再重建)
+    print("\n[warehouse] 物化 Parquet -> DuckDB 檔 (供儀表板唯讀開啟)...")
+    db_path = os.path.join(OUT_DIR, warehouse.DB_FILENAME)
+    built = warehouse.build_warehouse(
+        db_path,
+        os.path.join(OUT_DIR, "events_data.parquet"),
+        os.path.join(OUT_DIR, "products_data.parquet"),
+        os.path.join(OUT_DIR, "first_visit_users_data.parquet"),
+    )
+    print(f"[warehouse]     已建立 {built} -> {db_path}")
 
     print("\n[OK] ETL 完成")

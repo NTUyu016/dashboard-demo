@@ -2,6 +2,8 @@
 *.parquet
 *.csv
 *.db
+*.duckdb
+*.duckdb.wal
 # 例外：保留 duckdb 基準測試的參考數據
 !doc/duckdb-benchmark/timings.csv
 
