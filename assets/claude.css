@@ -1,0 +1,155 @@
+/* ============================================================
+   Claude / Anthropic 風格主題 (依 design.md)
+   cream canvas + coral accent + dark navy，editorial serif 標題
+   字體用開源替代：Cormorant Garamond (serif) / Inter (body)
+   ============================================================ */
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&family=Inter:wght@400;500;600&family=JetBrains+Mono&display=swap');
+
+:root {
+  /* ── design tokens ── */
+  --canvas: #faf9f5;
+  --surface-soft: #f5f0e8;
+  --surface-card: #efe9de;
+  --surface-cream-strong: #e8e0d2;
+  --surface-dark: #181715;
+  --surface-dark-elevated: #252320;
+  --hairline: #e6dfd8;
+  --ink: #141413;
+  --body-strong: #252523;
+  --body: #3d3d3a;
+  --muted: #6c6a64;
+  --muted-soft: #8e8b82;
+  --primary: #cc785c;
+  --primary-active: #a9583e;
+  --accent-teal: #5db8a6;
+  --accent-amber: #e8a55a;
+  --success: #5db872;
+  --warning: #d4a017;
+  --error: #c64545;
+
+  /* ── 覆寫 Bootstrap 5 (dbc) 變數，讓元件全面換色 ── */
+  --bs-primary: #cc785c;
+  --bs-primary-rgb: 204, 120, 92;
+  --bs-body-bg: #faf9f5;
+  --bs-body-color: #3d3d3a;
+  --bs-border-color: #e6dfd8;
+  --bs-font-sans-serif: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --bs-link-color: #cc785c;
+  --bs-link-hover-color: #a9583e;
+}
+
+/* ── 全域底色與字體 ── */
+body, .dash-app-content {
+  background-color: var(--canvas) !important;
+  color: var(--body);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+/* ── editorial serif 標題 (Copernicus 的開源替代) ── */
+h1, h2, h3, h4, h5, h6, .card-title, .navbar-brand {
+  font-family: 'Cormorant Garamond', 'EB Garamond', 'Times New Roman', serif !important;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+
+/* KPI 大數字也走 serif，呼應 pricing 數字用 serif 的設計 */
+.card h3, .card h4 {
+  font-family: 'Cormorant Garamond', serif !important;
+  font-weight: 600;
+}
+
+/* ── 卡片：cream-card 底、hairline 邊、12px 圓角、陰影極淡 ── */
+.card {
+  background-color: var(--surface-card) !important;
+  border: 1px solid var(--hairline) !important;
+  border-radius: 12px !important;
+  box-shadow: none !important;
+}
+/* 把原本的 shadow-sm 也壓掉，色塊優先、陰影罕用 */
+.shadow-sm { box-shadow: none !important; }
+
+/* ── 頂部 banner：cream nav，ink 字 + coral 標記 (top-nav 規格) ── */
+.navbar {
+  background-color: var(--canvas) !important;
+  border-bottom: 1px solid var(--hairline);
+}
+.navbar .navbar-brand, .navbar .navbar-brand * { color: var(--ink) !important; }
+.navbar .navbar-brand .bi { color: var(--primary) !important; }
+
+/* ── 按鈕 ── */
+.btn-primary {
+  background-color: var(--primary) !important;
+  border-color: var(--primary) !important;
+  color: #fff !important;
+  border-radius: 8px !important;
+  font-weight: 500;
+}
+.btn-primary:active, .btn-primary:focus {
+  background-color: var(--primary-active) !important;
+  border-color: var(--primary-active) !important;
+}
+.btn-outline-secondary {
+  color: var(--ink) !important;
+  border-color: var(--hairline) !important;
+  background-color: var(--canvas) !important;
+  border-radius: 8px !important;
+}
+
+/* ── 分頁 tabs：active 用 coral 底線 + ink 字 ── */
+.nav-tabs { border-bottom: 1px solid var(--hairline); }
+.nav-tabs .nav-link {
+  color: var(--muted) !important;
+  border: none !important;
+  font-weight: 500;
+}
+.nav-tabs .nav-link.active {
+  color: var(--ink) !important;
+  background: transparent !important;
+  border-bottom: 2px solid var(--primary) !important;
+}
+
+/* ── 下拉 / 輸入：cream 底、hairline 邊、coral focus ── */
+.Select-control, .form-control, .input-group-text {
+  background-color: var(--canvas) !important;
+  border: 1px solid var(--hairline) !important;
+  border-radius: 8px !important;
+  color: var(--ink) !important;
+}
+.is-focused:not(.is-open) > .Select-control,
+.form-control:focus {
+  border-color: var(--primary) !important;
+  box-shadow: 0 0 0 3px rgba(204, 120, 92, 0.15) !important;
+}
+.Select--multi .Select-value {
+  background-color: var(--surface-cream-strong) !important;
+  border-color: var(--hairline) !important;
+  color: var(--ink) !important;
+  border-radius: 6px !important;
+}
+
+/* ── DatePickerRange (cream 化) ── */
+.DateInput_input { color: var(--ink); font-family: 'Inter', sans-serif; }
+.CalendarDay__selected, .CalendarDay__selected:hover {
+  background: var(--primary); border-color: var(--primary);
+}
+
+/* ── 進度條 (各階段轉換率) ── */
+.progress { background-color: var(--surface-cream-strong); }
+.progress-bar { background-color: var(--primary) !important; }
+
+/* ── DataTable：ink 表頭、cream 列、hairline 分隔 ── */
+.dash-spreadsheet-container .dash-spreadsheet-inner th {
+  background-color: var(--ink) !important;
+  color: var(--canvas) !important;
+  font-family: 'Inter', sans-serif;
+}
+.dash-spreadsheet-container .dash-spreadsheet-inner td {
+  background-color: var(--canvas);
+  color: var(--body);
+  border-color: var(--hairline) !important;
+}
+
+/* ── 頁尾 / 雜項 ── */
+.text-muted { color: var(--muted) !important; }
+code { color: var(--primary); font-family: 'JetBrains Mono', monospace; }

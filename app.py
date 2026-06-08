@@ -2,7 +2,7 @@
 """
 GA4 電商流量分析儀表板 (DuckDB + Plotly Dash)
 資料源：Google GA4 obfuscated sample ecommerce (BigQuery 公開資料集)
-主題：FLATLY
+主題：Claude / Anthropic 風格 (cream canvas + coral，見 assets/claude.css 與 design.md)
 
 啟動：
     python app.py
@@ -222,15 +222,27 @@ def delta_badge(cur, prev, label="前期"):
     up = pct >= 0
     return html.Span(
         f"{'▲' if up else '▼'} {abs(pct):.1f}% vs {label}",
-        style={"color": "#18BC9C" if up else "#E74C3C", "fontWeight": "600"},
+        style={"color": TEAL if up else "#c64545", "fontWeight": "600"},
     )
 
 
 # ──────────────────────────────────────────────────────────────
-# 2. 視覺元件
+# 2. 視覺元件 — Claude / Anthropic 風格調色盤 (依 design.md)
+#    cream canvas + coral accent + dark navy。NAVY/BLUE 沿用變數名但重新指色，
+#    BLUE 改指品牌 coral，NAVY 改指 dark surface ink，減少散落各圖的改動。
 # ──────────────────────────────────────────────────────────────
-NAVY = "#2C3E50"
-BLUE = "#2980B9"
+INK    = "#141413"   # 標題/深色表頭
+NAVY   = "#181715"   # dark surface
+CORAL  = "#cc785c"   # 品牌主色 (primary)
+BLUE   = "#cc785c"   # (相容別名) 原藍色一律改 coral
+TEAL   = "#5db8a6"   # 次要 accent
+AMBER  = "#e8a55a"   # 第三 accent
+CANVAS = "#faf9f5"   # cream 底
+PAPER  = "rgba(0,0,0,0)"  # 圖表透明底，露出 cream 卡片
+
+# 效能 Badge 樣式：出現約 1 秒後快速淡出 (透過 opacity 切換)
+BADGE_STYLE = {"fontSize": "1rem", "fontWeight": "600",
+               "whiteSpace": "nowrap", "transition": "opacity .4s"}
 
 # 效能 Badge 樣式：出現約 1 秒後快速淡出 (透過 opacity 切換)
 BADGE_STYLE = {"fontSize": "1rem", "fontWeight": "600",
@@ -257,9 +269,9 @@ banner = dbc.Navbar(
             [
                 dbc.Col(
                     html.Span(
-                        [html.I(className="bi bi-bar-chart-fill me-2"),
+                        [html.I(className="bi bi-asterisk me-2"),
                          "GA4 電商流量分析儀表板"],
-                        className="navbar-brand mb-0 h4 text-white",
+                        className="navbar-brand mb-0 h4",
                     ),
                     width="auto",
                 ),
@@ -278,7 +290,7 @@ banner = dbc.Navbar(
         ),
         fluid=True,
     ),
-    color="primary", dark=True, className="shadow mb-3",
+    color="light", dark=False, className="mb-3",
 )
 
 control_panel = dbc.Card(
@@ -360,8 +372,8 @@ kpi_row = dbc.Row(
     [
         dbc.Col(kpi_card("kpi-events",  "事件總數",       "bi-activity",   BLUE),      md=3),
         dbc.Col(kpi_card("kpi-users",   "不重複使用者",   "bi-people",     NAVY),      md=3),
-        dbc.Col(kpi_card("kpi-revenue", "收益 (USD)", "bi-cash-stack", "#18BC9C"), md=3),
-        dbc.Col(kpi_card("kpi-orders",  "交易筆數",       "bi-bag-check",  "#F39C12"), md=3),
+        dbc.Col(kpi_card("kpi-revenue", "收益 (USD)", "bi-cash-stack", TEAL), md=3),
+        dbc.Col(kpi_card("kpi-orders",  "交易筆數",       "bi-bag-check",  AMBER), md=3),
     ],
     className="g-3 mb-3",
 )
@@ -459,11 +471,11 @@ tab_events = dbc.Tab(
                 style_header={"backgroundColor": NAVY, "color": "white", "fontWeight": "bold"},
                 style_cell={
                     "fontSize": "13px", "padding": "8px",
-                    "fontFamily": "Segoe UI, sans-serif", "textAlign": "left",
+                    "fontFamily": "Inter, sans-serif", "textAlign": "left",
                     "maxWidth": "180px", "overflow": "hidden", "textOverflow": "ellipsis",
                 },
                 style_data_conditional=[
-                    {"if": {"row_index": "odd"}, "backgroundColor": "#F8F9FA"}
+                    {"if": {"row_index": "odd"}, "backgroundColor": "#f5f0e8"}
                 ],
             ),
         ]), className="shadow-sm border-0"),
@@ -521,14 +533,14 @@ tab_products = dbc.Tab(
                     {"name": "小計(USD)",    "id": "item_total_revenue"},
                 ],
                 style_as_list_view=True,
-                style_header={"backgroundColor": "#18BC9C", "color": "white", "fontWeight": "bold"},
+                style_header={"backgroundColor": TEAL, "color": "white", "fontWeight": "bold"},
                 style_cell={
                     "fontSize": "13px", "padding": "8px",
-                    "fontFamily": "Segoe UI, sans-serif", "textAlign": "left",
+                    "fontFamily": "Inter, sans-serif", "textAlign": "left",
                     "maxWidth": "180px", "overflow": "hidden", "textOverflow": "ellipsis",
                 },
                 style_data_conditional=[
-                    {"if": {"row_index": "odd"}, "backgroundColor": "#F0FBF8"}
+                    {"if": {"row_index": "odd"}, "backgroundColor": "#f5f0e8"}
                 ],
             ),
         ]), className="shadow-sm border-0"),
@@ -559,8 +571,8 @@ _nu_body = [
     dbc.Row(
         [
             dbc.Col(nu_stat("nu-total",     "新用戶數",      "bi-person-plus", BLUE),     md=3),
-            dbc.Col(nu_stat("nu-converted", "已轉換人數",    "bi-bag-check",   "#18BC9C"), md=3),
-            dbc.Col(nu_stat("nu-rate",      "新用戶轉換率",  "bi-percent",     "#E74C3C"), md=3),
+            dbc.Col(nu_stat("nu-converted", "已轉換人數",    "bi-bag-check",   TEAL), md=3),
+            dbc.Col(nu_stat("nu-rate",      "新用戶轉換率",  "bi-percent",     "#c64545"), md=3),
             dbc.Col(nu_stat("nu-days",      "平均首購天數",  "bi-clock",       NAVY),      md=3),
         ],
         className="g-3 mb-3",
@@ -631,7 +643,8 @@ tab_newusers = dbc.Tab(
 # ──────────────────────────────────────────────────────────────
 app = Dash(
     __name__,
-    external_stylesheets=[dbc.themes.FLATLY, dbc.icons.BOOTSTRAP],
+    # 中性 Bootstrap 底 + assets/claude.css 覆寫成 Claude/Anthropic 風格
+    external_stylesheets=[dbc.themes.BOOTSTRAP, dbc.icons.BOOTSTRAP],
     title="GA4 Analytics Dashboard",
     suppress_callback_exceptions=True,
 )
@@ -667,7 +680,7 @@ app.layout = dbc.Container(
         ),
     ],
     fluid=True,
-    style={"backgroundColor": "#ECF0F1", "minHeight": "100vh"},
+    style={"backgroundColor": "#faf9f5", "minHeight": "100vh"},
 )
 
 
@@ -796,15 +809,15 @@ def refresh_events(mediums, event_names, countries, keyword, date_start, date_en
 
     # 事件組成橫條圖
     fig_comp = px.bar(comp, x="cnt", y="name", orientation="h", text="cnt",
-                      color="cnt", color_continuous_scale=["#D6EAF8", BLUE, NAVY])
+                      color="cnt", color_continuous_scale=["#efe9de", BLUE, NAVY])
     fig_comp.update_traces(texttemplate="%{text:,}", textposition="outside",
                            textfont_size=10, cliponaxis=False)
     fig_comp.update_coloraxes(showscale=False)
     fig_comp.update_layout(
         margin=dict(l=10, r=60, t=10, b=10),
         yaxis=dict(title="", autorange="reversed", tickfont_size=11),
-        xaxis_title="筆數", plot_bgcolor="white", paper_bgcolor="white",
-        font=dict(family="Segoe UI"),
+        xaxis_title="筆數", plot_bgcolor=PAPER, paper_bgcolor=PAPER,
+        font=dict(family="Inter"),
     )
 
     # ── 雙軸時序圖 (事件量長條 + 7日均線 + 收益折線) ──
@@ -813,19 +826,19 @@ def refresh_events(mediums, event_names, countries, keyword, date_start, date_en
         trend = trend.sort_values("d")
         trend["ma7"] = trend["events"].rolling(7, min_periods=1).mean()
         fig_trend.add_bar(x=trend["d"], y=trend["events"], name="事件量",
-                          marker_color="#AED6F1")
+                          marker_color="#e6cabd")
         fig_trend.add_trace(go.Scatter(
             x=trend["d"], y=trend["ma7"], name="7日均線",
-            mode="lines", line=dict(color="#2C3E50", width=2, dash="dot"),
+            mode="lines", line=dict(color=NAVY, width=2, dash="dot"),
         ))
         fig_trend.add_trace(go.Scatter(
             x=trend["d"], y=trend["revenue"],
             name="收益", mode="lines+markers",
-            line=dict(color="#18BC9C", width=2), yaxis="y2",
+            line=dict(color=TEAL, width=2), yaxis="y2",
         ))
     fig_trend.update_layout(
         margin=dict(l=10, r=10, t=10, b=10),
-        plot_bgcolor="white", paper_bgcolor="white", font=dict(family="Segoe UI"),
+        plot_bgcolor=PAPER, paper_bgcolor=PAPER, font=dict(family="Inter"),
         yaxis=dict(title="事件量"),
         yaxis2=dict(title="收益 (USD)", overlaying="y", side="right", showgrid=False),
         legend=dict(orientation="h", y=1.12, x=0),
@@ -833,22 +846,22 @@ def refresh_events(mediums, event_names, countries, keyword, date_start, date_en
 
     # 裝置圓餅
     fig_pie = px.pie(device, names="device", values="cnt",
-                     color_discrete_sequence=["#2980B9", "#2C3E50", "#18BC9C", "#F39C12"])
+                     color_discrete_sequence=[CORAL, NAVY, TEAL, AMBER])
     fig_pie.update_traces(textposition="inside", textinfo="percent+label")
     fig_pie.update_layout(margin=dict(l=10, r=10, t=10, b=10),
-                          paper_bgcolor="white", font=dict(family="Segoe UI"),
+                          paper_bgcolor=PAPER, font=dict(family="Inter"),
                           showlegend=False)
 
     # ── 轉換漏斗圖 (不重複使用者) ──
     fig_funnel = go.Figure(go.Funnel(
         y=stage_labels, x=stage_vals,
         textinfo="value+percent initial",
-        marker={"color": ["#AED6F1", "#5DADE2", "#2980B9", "#1F618D"]},
+        marker={"color": ["#e6cabd", "#d99a82", CORAL, "#8a4a34"]},
         connector={"line": {"color": "#D5DBDB"}},
     ))
     fig_funnel.update_layout(
         margin=dict(l=10, r=10, t=10, b=10),
-        paper_bgcolor="white", font=dict(family="Segoe UI"),
+        paper_bgcolor=PAPER, font=dict(family="Inter"),
     )
 
     # ── 各階段轉換率明細 (巢狀使用者，必 ≤ 100%) ──
@@ -870,7 +883,7 @@ def refresh_events(mediums, event_names, countries, keyword, date_start, date_en
         html.Hr(className="my-2"),
         html.Span("整體轉換率 (瀏覽→成交)", className="small fw-bold"),
         html.Span(f"{overall:.2f}%", className="float-end fw-bold",
-                  style={"color": "#E74C3C", "fontSize": "1.1rem"}),
+                  style={"color": "#c64545", "fontSize": "1.1rem"}),
     ]))
 
     badge = f"⚡ DuckDB 查詢 {elapsed*1000:.0f} ms · 掃描 {kpi[0]:,} 筆"
@@ -1016,7 +1029,7 @@ def refresh_products(mediums, event_names, countries, categories, keyword,
         fig_cat = px.bar(cat, x="revenue", y="category", orientation="h",
                          text="revenue", color="revenue",
                          custom_data=["category"],
-                         color_continuous_scale=["#AED6F1", BLUE, NAVY])
+                         color_continuous_scale=["#e6cabd", BLUE, NAVY])
         fig_cat.update_traces(texttemplate="$%{text:,.0f}", textposition="outside",
                               textfont_size=10, cliponaxis=False,
                               hovertemplate="<b>%{customdata[0]}</b><br>營收 $%{x:,.0f}<extra></extra>")
@@ -1029,7 +1042,7 @@ def refresh_products(mediums, event_names, countries, categories, keyword,
         margin=dict(l=20, r=40, t=10, b=10),
         yaxis=dict(title="", automargin=True),
         xaxis_title="營收 (USD)",
-        plot_bgcolor="white", paper_bgcolor="white", font=dict(family="Segoe UI"),
+        plot_bgcolor=PAPER, paper_bgcolor=PAPER, font=dict(family="Inter"),
     )
 
     # 熱銷商品橫條
@@ -1042,7 +1055,7 @@ def refresh_products(mediums, event_names, countries, categories, keyword,
         fig_items = px.bar(items, x="qty", y="item", orientation="h",
                            text="qty", color="qty",
                            custom_data=["item"],
-                           color_continuous_scale=["#A9DFBF", "#18BC9C", "#1A7A5E"])
+                           color_continuous_scale=["#cfe9e2", TEAL, "#2f7d6e"])
         # hover 用 customdata 帶完整商品名，不受 y 軸刻度截斷影響
         fig_items.update_traces(texttemplate="%{text:,}", textposition="outside",
                                 textfont_size=10, cliponaxis=False,
@@ -1056,7 +1069,7 @@ def refresh_products(mediums, event_names, countries, categories, keyword,
         margin=dict(l=20, r=40, t=10, b=10),
         yaxis=dict(title="", automargin=True),
         xaxis_title="數量",
-        plot_bgcolor="white", paper_bgcolor="white", font=dict(family="Segoe UI"),
+        plot_bgcolor=PAPER, paper_bgcolor=PAPER, font=dict(family="Inter"),
     )
 
     return fig_cat, fig_items, 0
@@ -1160,14 +1173,14 @@ if NEWUSER_AVAILABLE:
         fig_trend = go.Figure()
         if not trend.empty:
             fig_trend.add_bar(x=trend["d"], y=trend["new_users"], name="新增用戶",
-                              marker_color="#AED6F1")
+                              marker_color="#e6cabd")
             fig_trend.add_trace(go.Scatter(
                 x=trend["d"], y=trend["converted"], name="其中轉換",
-                mode="lines+markers", line=dict(color="#18BC9C", width=2), yaxis="y2",
+                mode="lines+markers", line=dict(color=TEAL, width=2), yaxis="y2",
             ))
         fig_trend.update_layout(
             margin=dict(l=10, r=10, t=10, b=10),
-            plot_bgcolor="white", paper_bgcolor="white", font=dict(family="Segoe UI"),
+            plot_bgcolor=PAPER, paper_bgcolor=PAPER, font=dict(family="Inter"),
             yaxis=dict(title="新增用戶"),
             yaxis2=dict(title="轉換數", overlaying="y", side="right", showgrid=False),
             legend=dict(orientation="h", y=1.12, x=0),
@@ -1175,10 +1188,10 @@ if NEWUSER_AVAILABLE:
 
         # ── 裝置圓餅 ──
         fig_device = px.pie(device, names="device", values="cnt",
-                            color_discrete_sequence=["#2980B9", "#2C3E50", "#18BC9C", "#F39C12"])
+                            color_discrete_sequence=[CORAL, NAVY, TEAL, AMBER])
         fig_device.update_traces(textposition="inside", textinfo="percent+label")
         fig_device.update_layout(margin=dict(l=10, r=10, t=10, b=10),
-                                 paper_bgcolor="white", font=dict(family="Segoe UI"),
+                                 paper_bgcolor=PAPER, font=dict(family="Inter"),
                                  showlegend=False)
 
         # ── 前十國家橫條 ──
@@ -1188,22 +1201,22 @@ if NEWUSER_AVAILABLE:
             country = country.iloc[::-1]
             fig_country = px.bar(country, x="cnt", y="country", orientation="h",
                                  text="cnt", color="cnt",
-                                 color_continuous_scale=["#D6EAF8", BLUE, NAVY])
+                                 color_continuous_scale=["#efe9de", BLUE, NAVY])
             fig_country.update_traces(texttemplate="%{text:,}", textposition="outside",
                                       textfont_size=10, cliponaxis=False)
             fig_country.update_coloraxes(showscale=False)
         fig_country.update_layout(
             margin=dict(l=10, r=50, t=10, b=10),
             yaxis=dict(title="", automargin=True), xaxis_title="新用戶數",
-            plot_bgcolor="white", paper_bgcolor="white", font=dict(family="Segoe UI"),
+            plot_bgcolor=PAPER, paper_bgcolor=PAPER, font=dict(family="Inter"),
         )
 
         # ── 流量媒介組成 (圓餅) ──
         fig_medium = px.pie(medium, names="medium", values="cnt", hole=0.45,
-                            color_discrete_sequence=px.colors.sequential.Blues_r)
+                            color_discrete_sequence=['#e6cabd', '#cc785c', '#a9583e', '#8a4a34', '#181715'])
         fig_medium.update_traces(textposition="inside", textinfo="percent+label")
         fig_medium.update_layout(margin=dict(l=10, r=10, t=10, b=10),
-                                 paper_bgcolor="white", font=dict(family="Segoe UI"),
+                                 paper_bgcolor=PAPER, font=dict(family="Inter"),
                                  showlegend=False)
 
         # ── 各媒介轉換率 ──
@@ -1216,7 +1229,7 @@ if NEWUSER_AVAILABLE:
             fig_conv = px.bar(conv, x="rate", y="medium", orientation="h",
                               text="rate", custom_data=["users", "buyers"],
                               color="rate",
-                              color_continuous_scale=["#A9DFBF", "#18BC9C", "#1A7A5E"])
+                              color_continuous_scale=["#cfe9e2", TEAL, "#2f7d6e"])
             fig_conv.update_traces(
                 texttemplate="%{text:.2f}%", textposition="outside",
                 textfont_size=10, cliponaxis=False,
@@ -1227,7 +1240,7 @@ if NEWUSER_AVAILABLE:
         fig_conv.update_layout(
             margin=dict(l=10, r=50, t=10, b=10),
             yaxis=dict(title="", automargin=True), xaxis_title="轉換率 (%)",
-            plot_bgcolor="white", paper_bgcolor="white", font=dict(family="Segoe UI"),
+            plot_bgcolor=PAPER, paper_bgcolor=PAPER, font=dict(family="Inter"),
         )
 
         return (
